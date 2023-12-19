@@ -1,9 +1,9 @@
 [package]
 name = "contaminate"
-version = "0.0.0"
-description = "A Tauri App"
-authors = ["you"]
-license = ""
+version = "0.0.1"
+description = "A generative art demo in Tauri"
+authors = ["Jeffrey Rosenbluth"]
+license = "MIT/Apache-2.0"
 repository = ""
 edition = "2021"
 

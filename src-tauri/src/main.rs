@@ -7,18 +7,31 @@ use rand::{rngs::SmallRng, SeedableRng};
 use rand_distr::{Distribution, Normal};
 use serde::Deserialize;
 use std::io::Cursor;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 struct State {
-    image: Mutex<RgbaImage>,
+    in_image: Arc<Mutex<RgbaImage>>,
+    out_image: Arc<Mutex<RgbaImage>>,
 }
 
 fn main() {
+    let img = RgbaImage::from_fn(1024, 924, |w, h| {
+        if w < 512 && h < 462 {
+            Rgba([150, 55, 10, 255])
+        } else if w > 512 && h > 462 {
+            Rgba([140, 135, 165, 255])
+        } else {
+            Rgba([255, 255, 255, 255])
+        }
+    });
     tauri::Builder::default()
         .manage(State {
-            image: Mutex::new(RgbaImage::new(0, 0)),
+            in_image: Arc::new(Mutex::new(img.clone())),
+            out_image: Arc::new(Mutex::new(img)),
         })
-        .invoke_handler(tauri::generate_handler![gen_image, show_image, save_image])
+        .invoke_handler(tauri::generate_handler![
+            gen_image, show_image, save_image, get_image
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -40,28 +53,27 @@ fn encode_rgba(image: &RgbaImage) -> String {
 
 #[tauri::command]
 fn save_image(path: &str, state: tauri::State<State>) {
-    let state_image = state.image.lock().unwrap();
+    let state_image = state.out_image.lock().unwrap();
     state_image.save(path).unwrap();
 }
 
 #[tauri::command]
-fn show_image(path: &str, state: tauri::State<State>) -> String {
+fn get_image(path: &str, state: tauri::State<State>) {
     let in_img = image::open(path).unwrap();
-    let mut state_image = state.image.lock().unwrap();
-    *state_image = in_img.as_rgba8().unwrap().clone();
-    encode_rgba(&in_img.into_rgba8())
+    let mut state_image = state.in_image.lock().unwrap();
+    *state_image = in_img.to_rgba8();
 }
 
 #[tauri::command]
-fn gen_image(
-    path: &str,
-    scale: f32,
-    bias: f32,
-    style: Style,
-    state: tauri::State<State>,
-) -> String {
+fn show_image(state: tauri::State<State>) -> String {
+    let state_image = state.in_image.lock().unwrap().clone();
+    encode_rgba(&state_image)
+}
+
+#[tauri::command]
+fn gen_image(scale: f32, bias: f32, style: Style, state: tauri::State<State>) -> String {
     let mut rng = SmallRng::seed_from_u64(0);
-    let in_img = image::open(path).unwrap();
+    let in_img = state.in_image.lock().unwrap().clone();
     let width = in_img.width() as i32;
     let height = in_img.height() as i32;
     let scale = match style {
@@ -70,7 +82,7 @@ fn gen_image(
         Style::Always => scale,
     };
     let normal = Normal::new(bias, scale * width as f32 / 4000.0).unwrap();
-    let mut out_image = image::RgbaImage::new(in_img.width(), in_img.height());
+    let mut out_img = image::RgbaImage::new(in_img.width(), in_img.height());
     for x in 0..width {
         for y in 0..height {
             let delta_x = normal.sample(&mut rng).round() as i32;
@@ -105,10 +117,10 @@ fn gen_image(
                 }
                 Style::Always => new_pixel,
             };
-            out_image.put_pixel(x as u32, y as u32, pixel);
+            out_img.put_pixel(x as u32, y as u32, *pixel);
         }
     }
-    let mut state_image = state.image.lock().unwrap();
-    *state_image = out_image.clone();
-    encode_rgba(&out_image)
+    let mut state_image = state.out_image.lock().unwrap();
+    *state_image = out_img.clone();
+    encode_rgba(&out_img)
 }
