@@ -24,8 +24,8 @@ let controls = {
 
       if (typeof file === "string") {
         try {
-          const img: string = await invoke("get_image", { path: file });
-          const img_data: string = await invoke("show_image", { data: img });
+          await invoke("get_image", { path: file });
+          const img_data: Uint8Array = await invoke("show_image");
           displayImage(img_data);
         } catch (error) {
           console.error(`Error: ${error}`);
@@ -38,7 +38,7 @@ let controls = {
 
   generate: async function () {
     try {
-      const img_data: string = await invoke("gen_image", {
+      const img_data: Uint8Array = await invoke("gen_image", {
         scale: controls.scale,
         bias: controls.bias,
         style: controls.style,
@@ -78,11 +78,13 @@ gui.add(controls, "chooseImage").name("Choose Image");
 gui.add(controls, "generate").name("Contaminate");
 gui.add(controls, "save").name("Save as PNG");
 
-function displayImage(base64Image: string) {
+function displayImage(img_data: Uint8Array) {
+  const blob = new Blob([img_data], { type: 'image/png' });
+  const url = URL.createObjectURL(blob);
   const imageElement = document.getElementById(
     "processedImage"
   ) as HTMLImageElement;
-  imageElement.src = `data:image/png;base64,${base64Image}`;
+  imageElement.src = url;
 }
 
 document.addEventListener("keydown", (event) => {

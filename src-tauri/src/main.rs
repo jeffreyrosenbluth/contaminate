@@ -1,7 +1,7 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use base64::{engine::general_purpose, Engine as _};
+// use base64::{engine::general_purpose, Engine as _};
 use image::*;
 use rand::{rngs::SmallRng, SeedableRng};
 use rand_distr::{Distribution, Normal};
@@ -44,12 +44,21 @@ enum Style {
     Always,
 }
 
-fn encode_rgba(image: &RgbaImage) -> String {
-    let mut buf = Vec::new();
-    let mut cursor = Cursor::new(&mut buf);
-    let _ = image.write_to(&mut cursor, image::ImageOutputFormat::Png);
-    general_purpose::STANDARD.encode(&mut cursor.get_ref())
+fn encode_rgba(image: &RgbaImage) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    let mut cursor = Cursor::new(&mut bytes);
+    image
+        .write_to(&mut cursor, image::ImageOutputFormat::Png)
+        .unwrap();
+    cursor.into_inner().clone()
 }
+
+// fn encode_rgba(image: &RgbaImage) -> String {
+//     let mut buf = Vec::new();
+//     let mut cursor = Cursor::new(&mut buf);
+//     let _ = image.write_to(&mut cursor, image::ImageOutputFormat::Png);
+//     general_purpose::STANDARD.encode(&mut cursor.get_ref())
+// }
 
 #[tauri::command]
 fn save_image(path: &str, state: tauri::State<State>) {
@@ -60,18 +69,18 @@ fn save_image(path: &str, state: tauri::State<State>) {
 #[tauri::command]
 fn get_image(path: &str, state: tauri::State<State>) {
     let in_img = image::open(path).unwrap();
-    let mut state_image = state.in_image.lock().unwrap();
-    *state_image = in_img.to_rgba8();
+    let mut state_in_image = state.in_image.lock().unwrap();
+    *state_in_image = in_img.to_rgba8();
 }
 
 #[tauri::command]
-fn show_image(state: tauri::State<State>) -> String {
+fn show_image(state: tauri::State<State>) -> Vec<u8> {
     let state_image = state.in_image.lock().unwrap().clone();
     encode_rgba(&state_image)
 }
 
 #[tauri::command]
-fn gen_image(scale: f32, bias: f32, style: Style, state: tauri::State<State>) -> String {
+fn gen_image(scale: f32, bias: f32, style: Style, state: tauri::State<State>) -> Vec<u8> {
     let mut rng = SmallRng::seed_from_u64(0);
     let in_img = state.in_image.lock().unwrap().clone();
     let width = in_img.width() as i32;
