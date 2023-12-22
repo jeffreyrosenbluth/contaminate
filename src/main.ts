@@ -2,6 +2,12 @@ import { invoke } from "@tauri-apps/api/tauri";
 import { dialog } from "@tauri-apps/api";
 import GUI from "lil-gui";
 
+interface Picture {
+  width: number;
+  height: number;
+  data: Uint8Array;
+}
+
 const gui = new GUI();
 
 let controls = {
@@ -17,16 +23,20 @@ let controls = {
         filters: [
           {
             name: "Images",
-            extensions: ["png", "jpeg", "jpg"],
+            extensions: ["png", "jpeg", "jpg", "tiff", "webp"],
           },
         ],
       });
 
       if (typeof file === "string") {
         try {
-          await invoke("get_image", { path: file });
-          const [width, height, img_data]: [number, number, Uint8Array] = await invoke("show_image");
-          displayImage(width, height, img_data);
+          const picture: Picture = await invoke("get_image", {
+            path: file,
+            scale: controls.scale,
+            bias: controls.bias,
+            style: controls.style,
+          });
+          displayImage(picture.width, picture.height, picture.data);
         } catch (error) {
           console.error(`Error: ${error}`);
         }
@@ -38,12 +48,12 @@ let controls = {
 
   generate: async function () {
     try {
-      const [width, height, img_data]: [number, number, Uint8Array] = await invoke("gen_image", {
+      const picture: Picture = await invoke("gen_image", {
         scale: controls.scale,
         bias: controls.bias,
         style: controls.style,
       });
-      displayImage(width, height, img_data);
+      displayImage(picture.width, picture.height, picture.data);
     } catch (error) {
       console.error(`Error: ${error}`);
     }
@@ -63,6 +73,9 @@ let controls = {
       if (typeof file === "string") {
         await invoke("save_image", {
           path: file,
+          scale: controls.scale,
+          bias: controls.bias,
+          style: controls.style,
         });
       }
     } catch (error) {
@@ -79,22 +92,13 @@ gui.add(controls, "generate").name("Contaminate");
 gui.add(controls, "save").name("Save as PNG");
 
 function displayImage(width: number, height: number, data: Uint8Array) {
-  const canvas = document.querySelector('canvas') as HTMLCanvasElement;
+  const canvas = document.querySelector("canvas") as HTMLCanvasElement;
   const aspect = width / height;
-  const ctx = canvas.getContext('2d')
+  const ctx = canvas.getContext("2d");
   canvas.height = 1024 / aspect;
   let clamped_data = new Uint8ClampedArray(data);
   const img_data = new ImageData(clamped_data, width, height);
-  const offCanvas = document.createElement('canvas');
-  offCanvas.width = width;
-  offCanvas.height = height;
-  const offCtx = offCanvas.getContext('2d');
-  if (offCtx) {
-    offCtx.putImageData(img_data, 0, 0);
-  }
-  if (ctx) {
-    ctx.drawImage(offCanvas, 0, 0, 1024, 1024 / aspect);
-  }
+  ctx!.putImageData(img_data, 0, 0);
 }
 
 document.addEventListener("keydown", (event) => {

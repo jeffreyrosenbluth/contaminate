@@ -1,37 +1,31 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-// use base64::{engine::general_purpose, Engine as _};
 use image::*;
 use rand::{rngs::SmallRng, SeedableRng};
 use rand_distr::{Distribution, Normal};
-use serde::Deserialize;
-use std::io::Cursor;
+use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
+const W: f32 = 1024.0;
+
 struct State {
-    in_image: Arc<Mutex<RgbaImage>>,
-    out_image: Arc<Mutex<RgbaImage>>,
+    base_image: Arc<Mutex<RgbaImage>>,
+}
+
+#[derive(Serialize)]
+struct Picture {
+    width: u32,
+    height: u32,
+    data: Vec<u8>,
 }
 
 fn main() {
-    let img = RgbaImage::from_fn(1024, 924, |w, h| {
-        if w < 512 && h < 462 {
-            Rgba([150, 55, 10, 255])
-        } else if w > 512 && h > 462 {
-            Rgba([140, 135, 165, 255])
-        } else {
-            Rgba([255, 255, 255, 255])
-        }
-    });
     tauri::Builder::default()
         .manage(State {
-            in_image: Arc::new(Mutex::new(img.clone())),
-            out_image: Arc::new(Mutex::new(img)),
+            base_image: Arc::new(Mutex::new(RgbaImage::new(0, 0))),
         })
-        .invoke_handler(tauri::generate_handler![
-            gen_image, show_image, save_image, get_image
-        ])
+        .invoke_handler(tauri::generate_handler![gen_image, save_image, get_image])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -44,47 +38,45 @@ enum Style {
     Always,
 }
 
-fn encode_rgba(image: &RgbaImage) -> Vec<u8> {
-    let mut bytes = Vec::new();
-    let mut cursor = Cursor::new(&mut bytes);
-    image
-        .write_to(&mut cursor, image::ImageOutputFormat::Png)
-        .unwrap();
-    bytes
+#[tauri::command]
+fn save_image(path: &str, scale: f32, bias: f32, style: Style, state: tauri::State<State>) {
+    let gen = generate(scale, bias, style, state);
+    gen.save(path).unwrap();
 }
 
 #[tauri::command]
-fn save_image(path: &str, state: tauri::State<State>) {
-    let state_image = state.out_image.lock().unwrap();
-    state_image.save(path).unwrap();
+fn get_image(path: &str, state: tauri::State<State>) -> Picture {
+    let img = image::open(path).unwrap();
+    let mut state_base_image = state.base_image.lock().unwrap();
+    *state_base_image = img.to_rgba8();
+    let scale = W / img.width() as f32;
+    let nwidth = (img.width() as f32 * scale) as u32;
+    let nhight = (img.height() as f32 * scale) as u32;
+    let new_img = imageops::resize(&img, nwidth, nhight, imageops::FilterType::Lanczos3);
+    Picture {
+        width: nwidth,
+        height: nhight,
+        data: new_img.into_vec(),
+    }
 }
 
 #[tauri::command]
-fn get_image(path: &str, state: tauri::State<State>) {
-    let in_img = image::open(path).unwrap();
-    let mut state_in_image = state.in_image.lock().unwrap();
-    *state_in_image = in_img.to_rgba8();
+fn gen_image(scale: f32, bias: f32, style: Style, state: tauri::State<State>) -> Picture {
+    let img = generate(scale, bias, style, state);
+    let scale = W / img.width() as f32;
+    let nwidth = (img.width() as f32 * scale) as u32;
+    let nhight = (img.height() as f32 * scale) as u32;
+    let new_img = imageops::resize(&img, nwidth, nhight, imageops::FilterType::Lanczos3);
+    Picture {
+        width: nwidth,
+        height: nhight,
+        data: new_img.into_vec(),
+    }
 }
 
-#[tauri::command]
-fn show_image(state: tauri::State<State>) -> (u32, u32, Vec<u8>) {
-    let state_image = state.in_image.lock().unwrap().clone();
-    (
-        state_image.width(),
-        state_image.height(),
-        state_image.into_vec(),
-    )
-}
-
-#[tauri::command]
-fn gen_image(
-    scale: f32,
-    bias: f32,
-    style: Style,
-    state: tauri::State<State>,
-) -> (u32, u32, Vec<u8>) {
+fn generate(scale: f32, bias: f32, style: Style, state: tauri::State<State>) -> RgbaImage {
     let mut rng = SmallRng::seed_from_u64(0);
-    let in_img = state.in_image.lock().unwrap().clone();
+    let in_img = state.base_image.lock().unwrap().clone();
     let width = in_img.width() as i32;
     let height = in_img.height() as i32;
     let scale = match style {
@@ -131,7 +123,5 @@ fn gen_image(
             out_img.put_pixel(x as u32, y as u32, *pixel);
         }
     }
-    let mut state_image = state.out_image.lock().unwrap();
-    *state_image = out_img.clone();
-    (in_img.width(), in_img.height(), out_img.into_vec())
+    out_img
 }
