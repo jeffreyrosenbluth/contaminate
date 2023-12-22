@@ -9,10 +9,12 @@ use std::sync::{Arc, Mutex};
 
 const W: f32 = 1024.0;
 
+// Shared state for the tauri app.
 struct State {
     base_image: Arc<Mutex<RgbaImage>>,
 }
 
+// Data to send to the js side for rendering the image.
 #[derive(Serialize)]
 struct Picture {
     width: u32,
@@ -30,6 +32,8 @@ fn main() {
         .expect("error while running tauri application");
 }
 
+// Choose between always keeping the modified pixe or only if its
+// lighter or darker than the original pixel.
 #[allow(dead_code)]
 #[derive(Deserialize)]
 enum Style {
@@ -44,6 +48,8 @@ fn save_image(path: &str, scale: f32, bias: f32, style: Style, state: tauri::Sta
     gen.save(path).unwrap();
 }
 
+// Open the image and store it in the global state.
+// Scale it to the canvas size before sending it to the js side.
 #[tauri::command]
 fn get_image(path: &str, state: tauri::State<State>) -> Picture {
     let img = image::open(path).unwrap();
@@ -60,6 +66,8 @@ fn get_image(path: &str, state: tauri::State<State>) -> Picture {
     }
 }
 
+// Run the conatimate alogoritm 'generat' and send the scaled result to the
+// frontend.
 #[tauri::command]
 fn gen_image(scale: f32, bias: f32, style: Style, state: tauri::State<State>) -> Picture {
     let img = generate(scale, bias, style, state);
@@ -74,6 +82,7 @@ fn gen_image(scale: f32, bias: f32, style: Style, state: tauri::State<State>) ->
     }
 }
 
+// The contaminate algorithm.
 fn generate(scale: f32, bias: f32, style: Style, state: tauri::State<State>) -> RgbaImage {
     let mut rng = SmallRng::seed_from_u64(0);
     let in_img = state.base_image.lock().unwrap().clone();
