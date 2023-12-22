@@ -50,15 +50,8 @@ fn encode_rgba(image: &RgbaImage) -> Vec<u8> {
     image
         .write_to(&mut cursor, image::ImageOutputFormat::Png)
         .unwrap();
-    cursor.into_inner().clone()
+    bytes
 }
-
-// fn encode_rgba(image: &RgbaImage) -> String {
-//     let mut buf = Vec::new();
-//     let mut cursor = Cursor::new(&mut buf);
-//     let _ = image.write_to(&mut cursor, image::ImageOutputFormat::Png);
-//     general_purpose::STANDARD.encode(&mut cursor.get_ref())
-// }
 
 #[tauri::command]
 fn save_image(path: &str, state: tauri::State<State>) {
@@ -74,13 +67,22 @@ fn get_image(path: &str, state: tauri::State<State>) {
 }
 
 #[tauri::command]
-fn show_image(state: tauri::State<State>) -> Vec<u8> {
+fn show_image(state: tauri::State<State>) -> (u32, u32, Vec<u8>) {
     let state_image = state.in_image.lock().unwrap().clone();
-    encode_rgba(&state_image)
+    (
+        state_image.width(),
+        state_image.height(),
+        state_image.into_vec(),
+    )
 }
 
 #[tauri::command]
-fn gen_image(scale: f32, bias: f32, style: Style, state: tauri::State<State>) -> Vec<u8> {
+fn gen_image(
+    scale: f32,
+    bias: f32,
+    style: Style,
+    state: tauri::State<State>,
+) -> (u32, u32, Vec<u8>) {
     let mut rng = SmallRng::seed_from_u64(0);
     let in_img = state.in_image.lock().unwrap().clone();
     let width = in_img.width() as i32;
@@ -131,5 +133,5 @@ fn gen_image(scale: f32, bias: f32, style: Style, state: tauri::State<State>) ->
     }
     let mut state_image = state.out_image.lock().unwrap();
     *state_image = out_img.clone();
-    encode_rgba(&out_img)
+    (in_img.width(), in_img.height(), out_img.into_vec())
 }
