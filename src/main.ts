@@ -82,7 +82,7 @@ function displayImage(width: number, height: number, data: Uint8Array) {
   const canvas = document.querySelector('canvas') as HTMLCanvasElement;
   const aspect = width / height;
   const ctx = canvas.getContext('2d')
-  canvas.height = width / aspect;
+  canvas.height = 1024 / aspect;
   let clamped_data = new Uint8ClampedArray(data);
   const img_data = new ImageData(clamped_data, width, height);
   const offCanvas = document.createElement('canvas');
