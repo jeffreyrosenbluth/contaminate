@@ -32,7 +32,8 @@ fn main() {
         .expect("error while running tauri application");
 }
 
-// Choose between always keeping the modified pixe or only if its
+// Choose between always keeping the modified pixel, the average of
+// the new and original pixel coloe, or only if its
 // lighter or darker than the original pixel.
 #[allow(dead_code)]
 #[derive(Deserialize)]
@@ -40,11 +41,12 @@ enum Style {
     Darkest,
     Lightest,
     Always,
+    Mix,
 }
 
 #[tauri::command]
-fn save_image(path: &str, scale: f32, bias: f32, style: Style, state: tauri::State<State>) {
-    let gen = generate(scale, bias, style, state);
+fn save_image(path: &str, scale: f32, style: Style, state: tauri::State<State>) {
+    let gen = generate(scale, style, state);
     gen.save(path).unwrap();
 }
 
@@ -52,7 +54,13 @@ fn save_image(path: &str, scale: f32, bias: f32, style: Style, state: tauri::Sta
 // Scale it to the canvas size before sending it to the js side.
 #[tauri::command]
 fn get_image(path: &str, state: tauri::State<State>) -> Picture {
-    let img = image::open(path).unwrap();
+    let img = match image::open(path) {
+        Ok(img) => img,
+        Err(err) => {
+            println!("The file at {} could not be opened: {}", path, err);
+            DynamicImage::new_rgba8(0, 0)
+        }
+    };
     let mut state_base_image = state.base_image.lock().unwrap();
     *state_base_image = img.to_rgba8();
     let scale = W / img.width() as f32;
@@ -69,8 +77,8 @@ fn get_image(path: &str, state: tauri::State<State>) -> Picture {
 // Run the conatimate alogoritm 'generat' and send the scaled result to the
 // frontend.
 #[tauri::command]
-fn gen_image(scale: f32, bias: f32, style: Style, state: tauri::State<State>) -> Picture {
-    let img = generate(scale, bias, style, state);
+fn gen_image(scale: f32, style: Style, state: tauri::State<State>) -> Picture {
+    let img = generate(scale, style, state);
     let scale = W / img.width() as f32;
     let nwidth = (img.width() as f32 * scale) as u32;
     let nhight = (img.height() as f32 * scale) as u32;
@@ -83,17 +91,18 @@ fn gen_image(scale: f32, bias: f32, style: Style, state: tauri::State<State>) ->
 }
 
 // The contaminate algorithm.
-fn generate(scale: f32, bias: f32, style: Style, state: tauri::State<State>) -> RgbaImage {
+fn generate(scale: f32, style: Style, state: tauri::State<State>) -> RgbaImage {
     let mut rng = SmallRng::seed_from_u64(0);
     let in_img = state.base_image.lock().unwrap().clone();
     let width = in_img.width() as i32;
     let height = in_img.height() as i32;
     let scale = match style {
-        Style::Darkest => 2.0 * scale,
-        Style::Lightest => 2.0 * scale,
+        Style::Darkest => 2.5 * scale,
+        Style::Lightest => 2.5 * scale,
         Style::Always => scale,
+        Style::Mix => 2.5 * scale,
     };
-    let normal = Normal::new(bias, scale * width as f32 / 4000.0).unwrap();
+    let normal = Normal::new(0.0, scale * width as f32 / 4000.0).unwrap();
     let mut out_img = image::RgbaImage::new(in_img.width(), in_img.height());
     for x in 0..width {
         for y in 0..height {
@@ -112,6 +121,7 @@ fn generate(scale: f32, bias: f32, style: Style, state: tauri::State<State>) -> 
 
             let old_pixel = in_img.get_pixel(x as u32, y as u32);
             let new_pixel = in_img.get_pixel(x1 as u32, y1 as u32);
+            let pxl = &new_pixel.map2(old_pixel, |x, y| (x as f32 * 0.5 + y as f32 * 0.5) as u8);
             let pixel = match style {
                 Style::Darkest => {
                     if new_pixel.to_luma()[0] < old_pixel.to_luma()[0] {
@@ -128,6 +138,7 @@ fn generate(scale: f32, bias: f32, style: Style, state: tauri::State<State>) -> 
                     }
                 }
                 Style::Always => new_pixel,
+                Style::Mix => pxl,
             };
             out_img.put_pixel(x as u32, y as u32, *pixel);
         }

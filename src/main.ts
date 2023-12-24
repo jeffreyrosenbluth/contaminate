@@ -16,7 +16,7 @@ const gui = new GUI();
 async function chooseImage() {
   try {
     // Query the user for the filepath.
-    const file = await dialog.open({
+    const file = (await dialog.open({
       multiple: false,
       directory: false,
       filters: [
@@ -25,13 +25,12 @@ async function chooseImage() {
           extensions: ["png", "jpeg", "jpg", "tiff", "webp"],
         },
       ],
-    }) as string;
+    })) as string;
 
     // Open and save the image to the global state.
     const picture: Picture = await invoke("get_image", {
       path: file,
       scale: controls.scale,
-      bias: controls.bias,
       style: controls.style,
     });
 
@@ -48,7 +47,6 @@ async function generate() {
     // Run the contamination algorithm on the input image.
     const picture: Picture = await invoke("gen_image", {
       scale: controls.scale,
-      bias: controls.bias,
       style: controls.style,
     });
     // Show the contaminated image in the window.
@@ -62,7 +60,7 @@ async function generate() {
 // original input image.
 async function save() {
   try {
-    const file = await dialog.save({
+    const file = (await dialog.save({
       defaultPath: "contaminated.png",
       filters: [
         {
@@ -70,11 +68,10 @@ async function save() {
           extensions: ["png", "jpeg", "jpg"],
         },
       ],
-    }) as string;
+    })) as string;
     await invoke("save_image", {
       path: file,
       scale: controls.scale,
-      bias: controls.bias,
       style: controls.style,
     });
   } catch (error) {
@@ -85,7 +82,6 @@ async function save() {
 // Controls for the gui, two sliders a picker and 3 buttons.
 let controls = {
   scale: 50.0,
-  bias: 0.0,
   style: "Always",
   chooseImage: async function () {
     chooseImage();
@@ -95,13 +91,14 @@ let controls = {
   },
   save: async function () {
     save();
-  }
-}
+  },
+};
 
 // Setup the gui.
 gui.add(controls, "scale", 0, 200).step(1).name("Scale");
-gui.add(controls, "bias", -100, 100).step(1).name("Bias");
-gui.add(controls, "style", ["Always", "Lightest", "Darkest"]).name("Style");
+gui
+  .add(controls, "style", ["Always", "Lightest", "Darkest", "Mix"])
+  .name("Style");
 gui.add(controls, "chooseImage").name("Choose Image");
 gui.add(controls, "generate").name("Contaminate");
 gui.add(controls, "save").name("Save as PNG");
