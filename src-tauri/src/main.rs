@@ -5,13 +5,13 @@ use image::*;
 use rand::{rngs::SmallRng, SeedableRng};
 use rand_distr::{Distribution, Normal};
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 const W: f32 = 1024.0;
 
 // Shared state for the tauri app.
 struct State {
-    base_image: Arc<Mutex<RgbaImage>>,
+    base_image: Mutex<RgbaImage>,
 }
 
 // Data to send to the js side for rendering the image.
@@ -25,7 +25,7 @@ struct Picture {
 fn main() {
     tauri::Builder::default()
         .manage(State {
-            base_image: Arc::new(Mutex::new(RgbaImage::new(0, 0))),
+            base_image: Mutex::new(RgbaImage::new(0, 0)),
         })
         .invoke_handler(tauri::generate_handler![gen_image, save_image, get_image])
         .run(tauri::generate_context!())
@@ -47,7 +47,7 @@ enum Style {
 #[tauri::command]
 fn save_image(path: &str, scale: f32, style: Style, state: tauri::State<State>) {
     let gen = generate(scale, style, state);
-    gen.save(path).unwrap();
+    let _ = gen.save(path);
 }
 
 // Open the image and store it in the global state.
@@ -57,11 +57,11 @@ fn get_image(path: &str, state: tauri::State<State>) -> Picture {
     let img = match image::open(path) {
         Ok(img) => img,
         Err(err) => {
-            println!("The file at {} could not be opened: {}", path, err);
+            eprintln!("The file at {} could not be opened: {}", path, err);
             DynamicImage::new_rgba8(0, 0)
         }
     };
-    let mut state_base_image = state.base_image.lock().unwrap();
+    let mut state_base_image = state.base_image.lock().expect("Could not lock state mutex");
     *state_base_image = img.to_rgba8();
     let scale = W / img.width() as f32;
     let nwidth = (img.width() as f32 * scale) as u32;
@@ -93,7 +93,11 @@ fn gen_image(scale: f32, style: Style, state: tauri::State<State>) -> Picture {
 // The contaminate algorithm.
 fn generate(scale: f32, style: Style, state: tauri::State<State>) -> RgbaImage {
     let mut rng = SmallRng::seed_from_u64(0);
-    let in_img = state.base_image.lock().unwrap().clone();
+    let in_img = state
+        .base_image
+        .lock()
+        .expect("Could not lock state mutex")
+        .clone();
     let width = in_img.width() as i32;
     let height = in_img.height() as i32;
     let scale = match style {
@@ -102,7 +106,8 @@ fn generate(scale: f32, style: Style, state: tauri::State<State>) -> RgbaImage {
         Style::Always => scale,
         Style::Mix => 2.5 * scale,
     };
-    let normal = Normal::new(0.0, scale * width as f32 / 4000.0).unwrap();
+    let normal = Normal::new(0.0, scale * width as f32 / 4000.0)
+        .expect("Could not create normal distribution");
     let mut out_img = image::RgbaImage::new(in_img.width(), in_img.height());
     for x in 0..width {
         for y in 0..height {
