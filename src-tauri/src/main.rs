@@ -22,6 +22,23 @@ struct Picture {
     data: Vec<u8>,
 }
 
+#[derive(Deserialize)]
+enum Gradient {
+    None,
+    Horizontal,
+    Vertical,
+    Radial(f32, f32),
+}
+
+fn gradient(grad: &Gradient, s: f32, t: f32) -> f32 {
+    match grad {
+        Gradient::None => 1.0,
+        Gradient::Horizontal => s,
+        Gradient::Vertical => t,
+        Gradient::Radial(cx, cy) => ((s - *cx).powf(2.0) + (t - *cy).powf(2.0)).sqrt(),
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(State {
@@ -45,40 +62,48 @@ enum Style {
 }
 
 #[tauri::command]
-fn save_image(path: &str, scale: f32, style: Style, state: tauri::State<State>) {
-    let gen = generate(scale, style, state);
+fn save_image(
+    path: &str,
+    scale: f32,
+    style: Style,
+    grad: Gradient,
+    reverse: bool,
+    state: tauri::State<State>,
+) {
+    let gen = generate(scale, style, grad, reverse, state);
     let _ = gen.save(path);
 }
 
 // Open the image and store it in the global state.
 // Scale it to the canvas size before sending it to the js side.
 #[tauri::command]
-fn get_image(path: &str, state: tauri::State<State>) -> Picture {
-    let img = match image::open(path) {
-        Ok(img) => img,
-        Err(err) => {
-            eprintln!("The file at {} could not be opened: {}", path, err);
-            DynamicImage::new_rgba8(0, 0)
-        }
-    };
+fn get_image(path: &str, state: tauri::State<State>) -> Result<Picture, String> {
+    let img = image::open(path)
+        .map_err(|err| format!("The file at {} could not be opened: {}", path, err))?;
     let mut state_base_image = state.base_image.lock().expect("Could not lock state mutex");
     *state_base_image = img.to_rgba8();
     let scale = W / img.width() as f32;
     let nwidth = (img.width() as f32 * scale) as u32;
     let nhight = (img.height() as f32 * scale) as u32;
     let new_img = imageops::resize(&img, nwidth, nhight, imageops::FilterType::Lanczos3);
-    Picture {
+    Ok(Picture {
         width: nwidth,
         height: nhight,
         data: new_img.into_vec(),
-    }
+    })
 }
 
 // Run the conatimate alogoritm 'generat' and send the scaled result to the
 // frontend.
 #[tauri::command]
-fn gen_image(scale: f32, style: Style, state: tauri::State<State>) -> Picture {
-    let img = generate(scale, style, state);
+fn gen_image(
+    scale: f32,
+    style: Style,
+    grad: Gradient,
+    reverse: bool,
+    state: tauri::State<State>,
+) -> Picture {
+    let img = generate(scale, style, grad, reverse, state);
     let scale = W / img.width() as f32;
     let nwidth = (img.width() as f32 * scale) as u32;
     let nhight = (img.height() as f32 * scale) as u32;
@@ -91,7 +116,13 @@ fn gen_image(scale: f32, style: Style, state: tauri::State<State>) -> Picture {
 }
 
 // The contaminate algorithm.
-fn generate(scale: f32, style: Style, state: tauri::State<State>) -> RgbaImage {
+fn generate(
+    scale: f32,
+    style: Style,
+    grad: Gradient,
+    reverse: bool,
+    state: tauri::State<State>,
+) -> RgbaImage {
     let mut rng = SmallRng::seed_from_u64(0);
     let in_img = state
         .base_image
@@ -111,8 +142,14 @@ fn generate(scale: f32, style: Style, state: tauri::State<State>) -> RgbaImage {
     let mut out_img = image::RgbaImage::new(in_img.width(), in_img.height());
     for x in 0..width {
         for y in 0..height {
-            let delta_x = normal.sample(&mut rng).round() as i32;
-            let delta_y = normal.sample(&mut rng).round() as i32;
+            let s = x as f32 / width as f32;
+            let t = y as f32 / height as f32;
+            let mut k = gradient(&grad, s, t);
+            if reverse {
+                k = 1.0 - k;
+            }
+            let delta_x = (k * normal.sample(&mut rng).round()) as i32;
+            let delta_y = (k * normal.sample(&mut rng).round()) as i32;
             let x1 = if x + delta_x >= width {
                 (x - delta_x).clamp(0, width - 1)
             } else {
